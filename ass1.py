@@ -44,13 +44,13 @@ user_genres = reviews.select("userId",explode(reviews.genre_array).alias("split"
         .count()
 
 def getWatched(id_list):
-    return reviews.where(reviews.userId.isin(id_list))
+    return reviews.select("movieId","title","rating").where(reviews.userId.isin(id_list))
 
 def getForGenre(genre_list):
     return reviews.select("movieId","title").where(reviews.movieId.isin(genre_list))
 
 def get_year(year_list):
-    return reviews.select("movieId","title").where(reviews.movieId.isin(year_list))
+    return reviews.select("movieId","title").where(reviews.year_list.isin(year_list))
 
 def printDF(df,screen,pad):
     rows, cols = screen.getmaxyx()
