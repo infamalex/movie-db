@@ -17,11 +17,10 @@ MOVIE_DB_DIRECTORY = "ml-latest-small/"
 #read the data frames
 links = spark.read.csv(MOVIE_DB_DIRECTORY+"links.csv",inferSchema='True',header=True)
 
-movies = spark.read.csv(MOVIE_DB_DIRECTORY+"movies.csv",inferSchema='True',header=True)
-movies = movies.withColumn("genre_array",split(col("genres"),"[|]"))\
+movies = spark.read.csv(MOVIE_DB_DIRECTORY+"movies.csv",inferSchema='True',header=True)\
+    .withColumn("genre_array",split(col("genres"),"[|]"))\
     .drop("genres")\
     .withColumn("year",split(col("title"),"[(](?=.....$)|[)]$").getItem(1))
-movies.show()
     
     
      #split the generes into a list
@@ -49,6 +48,9 @@ def getWatched(id_list):
 
 def getForGenre(genre_list):
     return reviews.select("movieId","title").where(reviews.movieId.isin(genre_list))
+
+def get_year(year_list):
+    return reviews.select("movieId","title").where(reviews.movieId.isin(year_list))
 
 def printDF(df,screen,pad):
     rows, cols = screen.getmaxyx()
