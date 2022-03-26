@@ -4,12 +4,16 @@ import movies
 from re import match
 from pyspark.sql.functions import col
 
-TOP_PADDING=5
+TOP_PADDING=3
 help_text = [
     "Commands:",
     "watch [userid] ",
     "sort col_name",
     "sortd col_name",
+    "max len",
+    "all",
+    'movie [id|"title"]',
+    "comp id1 id2", 
     "quit"
 ]
 help_width = max(map(len,help_text))
@@ -71,7 +75,7 @@ class Table:
         self.ml = [max(len(l),max(map(lambda x : len(str(x[l])),data))) for l in self.titles] #get column widths
         self.index_width = max(len(str(len(data))),3)#width of the row number column
 
-    def draw_table(self,start):
+    def draw_table(self,start,max_length):
         
         if len(self.data) == 0 or self.screen == None:
             return 0
@@ -80,26 +84,35 @@ class Table:
         table = self.data[start:start+height-3]
 
         
-        self.screen.addstr(1,0,"{:>{}}|".format("row",self.index_width),curses.A_BOLD)
+        self.screen.attron(curses.A_BOLD)
+        self.screen.attron(curses.color_pair(3))
+        self.screen.addstr(1,0,"{:>{}}|".format("row",self.index_width))
         x = self.index_width + 1
         #draw title
         for col in range(len(self.titles)):
-            self.screen.addstr(1,x,"{:>{}}|".format(self.titles[col],self.ml[col]),curses.A_BOLD)
-            x+=self.ml[col]+1
+            length = min(self.ml[col],max_length)
+            self.screen.addstr(1,x,"{:>{}}|".format(self.titles[col],length))
+            x+=length+1
         self.screen.addstr(0, 0, '-'*width)
         self.screen.addstr(2, 0, '-'*width)
-
+        
+        self.screen.attroff(curses.A_BOLD)
+        self.screen.attroff(curses.color_pair(3))
+        
+        
+        self.screen.attron(curses.A_UNDERLINE)
         #draw table
         for row in range(len(table)):
-            self.screen.addstr(row+3,0,"{:>{}}|".format(str(start+row),self.index_width),curses.A_UNDERLINE)
+            self.screen.addstr(row+3,0,"{:>{}}|".format(str(start+row),self.index_width))
             x = self.index_width + 1
             line = table[row]
             for col in range(len(self.titles)):
-                length = self.ml[col]
+                length = min(self.ml[col],max_length)
                 self.screen.addstr(row+3,x,
                     "{:>{}}|".format(str(line[self.titles[col]])[:length],length),
                     curses.A_UNDERLINE)
-                x+=self.ml[col]+1
+                x+=length+1
+        self.screen.attroff(curses.A_UNDERLINE)
 
         return sum(self.ml) + len(self.titles) + self.index_width + 2 #return total width
             
@@ -109,8 +122,9 @@ class Table:
 def main(screen):
     result = None
     table = Table(None,[])
+    typed_flag = False
     k = 0
-    cursor_x = 0
+    max_length = 255
     table_y = 0
     table_x = 0 
     table_width=256
@@ -129,12 +143,15 @@ def main(screen):
     curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)
     curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_WHITE)
 
-    status = "movie database searcher | STATUS BAR | Message: {}"
+    info.attron(curses.color_pair(2))
+
+    status = "M.D.S.T. | INFO | Message: {}"
     statusmsg = ""
 
     # Loop where k is the last character pressed
     while (True):
         # Initialization
+        curses.curs_set(0)
         screen.erase()
         height, width = screen.getmaxyx()
         c_width = min(help_width+2,width)
@@ -145,8 +162,12 @@ def main(screen):
         info.resize(height-1, c_width)
         info.mvwin(0, width-c_width)
         
-        for i in range(min(len(help_text),height)):
-            info.addstr(4+i, 2, help_text[i][:c_width-1])
+        
+        info.attron(curses.A_BOLD)
+        for i in range(min(len(help_text),height-2)):
+            info.addstr(2+i, 2, help_text[i][:c_width-1])
+            info.attroff(curses.A_BOLD)
+
         for i in range(height-1):
             info.addch(i,0,'|')
 
@@ -191,6 +212,8 @@ def main(screen):
                     statusmsg = "column name not found"
             elif match("g(oto)? +\d+ *",command):
                 table_y = int(command.split()[1])
+            elif match("m(ax)? +\d+ *",command):
+                max_length = max(1,int(command.split()[1]))
             else:        
                 result = movies.handle_command(command)
                 if result == None:
@@ -205,23 +228,27 @@ def main(screen):
             
         elif 32 <= k <= 127: #all printable ascii
             command+=chr(k)
+            typed_flag = True
 
+        #thresholds for tha table position
         table_x = min(table_width-width+c_width, table_x)
         table_x = max(0, table_x)
 
         table_y = max(0, table_y)
         table_y = min(len(table.data)-1, table_y)
 
-        display.erase()
-        display.resize(height-TOP_PADDING,256)
-        table_width = table.draw_table(table_y)
+        if not typed_flag: #don't refresh table if last action was to type
+            display.erase()
+            display.resize(height-TOP_PADDING,511)
+            table_width = table.draw_table(table_y,max_length)
+        typed_flag = False
 
         # display current command prompt
         screen.attron(curses.color_pair(1))
-        screen.addstr(2,4,"command:> {}".format(command)[:width - c_width - 1],curses.COLOR_BLUE)
+        screen.addstr(1,4,"command:> {}".format(command)[:width - c_width - 1])
         screen.attroff(curses.color_pair(1))
 
-        #status
+        #status bar
         screen.attron(curses.color_pair(3))
         msg = status.format(statusmsg)
         screen.addstr(height - 1, 0, msg)

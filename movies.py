@@ -2,9 +2,12 @@
 
 from gc import collect
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import split, col, array_contains, explode, rank, collect_list, avg, count,round
+from pyspark.sql.functions import split, col, array_contains, explode, rank, collect_list, avg, count,round, array_repeat
 from pyspark.sql.window import Window
-from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.feature import VectorAssembler, StandardScaler
+from pyspark.ml.clustering import KMeans
+from pyspark.ml.evaluation import ClusteringEvaluator
+
 from re import match
 
 spark = SparkSession \
@@ -38,7 +41,7 @@ reviews= ratings.join(movies,
                "left"
                )
 #average review score
-reviews_avg = reviews.groupBy("movieId","title")\
+reviews_avg = reviews.groupBy("movieId","title",col("genre_array").alias("genres"),"year")\
     .agg(
         round(avg(col("rating")),1).alias("avg_rating"),
         count(col("rating")).alias("watches")
@@ -57,6 +60,45 @@ favorites = user_genres.select('*', rank()
         .alias('rank')) \
         .filter(col('rank') <= 5) 
 
+
+#vector assembler 
+pivoted = favorites\
+    .select("userId","rank","split",explode(array_repeat("rank",col("rank"))).alias("c"))\
+    .groupBy("userId").pivot("split").count()\
+    .na.fill(0)
+
+assemble=VectorAssembler(inputCols=[
+    'Action',
+    'Adventure',
+    'Animation',
+    'Children',
+    'Comedy',
+    'Crime',
+    'Documentary',
+    'Drama',
+    'Fantasy',
+    'Horror',
+    'IMAX',
+    'Musical',
+    'Mystery',
+    'Romance',
+    'Sci-Fi',
+    'Thriller',
+    'War',
+    'Western'
+],outputCol="features")
+assembled_data=assemble.transform(pivoted)
+
+scale=StandardScaler(inputCol='features',outputCol='standardized')
+data_scale=scale.fit(assembled_data)
+data_scale_output=data_scale.transform(assembled_data)
+data_scale_output.show(2)
+
+kmeans = KMeans(k=3, seed=69)  # 2 clusters here
+model = kmeans.fit(data_scale_output)#.select('features'))
+
+transformed = model.transform(data_scale_output).select("userId",col("prediction").alias("class"))
+transformed.show()   
 
 """
 get all movies watched by people in id_list
@@ -91,11 +133,18 @@ def get_year(year_list):
     return data,msg
 
 """
-get
+get movie by name or id
 """
 def get_movie(terms):
-    ids = [int(t) for t in terms if match("\d+")]
-    names = [t.strip() for t in terms if not match("\d+")]
+    ids = []
+    names = []
+    for t in terms:
+        if match("\d+",t): ids.append(int(t))
+        else: names.append(t.strip()[1:-1])
+        
+    data = reviews_avg.where(col("movieId").isin(ids) | col("title").isin(names))
+    msg = "Count: "+str(data.count())
+    return data,msg
 
 """
 get movies in common between 2 users
@@ -121,8 +170,10 @@ def handle_command(command_full):
         if match("^watch ( *\d+ *(,|$))+",command_full):
             return getWatched([int(i) for i in args.split(",")])
             
-        elif match("^movies",command_full):
+        elif match("^all *",command_full):
             return reviews_avg, str(reviews_avg.count())
+        elif match('^movie ( *"[^,]+" *(,|$))+',command_full):
+            return get_movie(args.split(","))
         elif match("^comp +\d+ +\d+ *$",command_full):
             id1, id2 = args.split()
             return compare(id1, id2)
@@ -150,7 +201,7 @@ def main(screen):
     #    id = int(input("Enter ID: "))
     #    things.select("title").where(things.userId == id).show()
     #reviews.show()
-    reviews_avg.show()
+    get_movie(['"Toy Story (1995)"'])[0].show()
 
 
     
