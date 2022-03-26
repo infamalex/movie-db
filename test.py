@@ -1,11 +1,15 @@
 import os
 import curses
+import movies
+from re import match
+from pyspark.sql.functions import col
 
 TOP_PADDING=5
 help_text = [
     "Commands:",
-    "watched [userid] ",
-    "command 2:",
+    "watch [userid] ",
+    "sort col_name",
+    "sortd col_name",
     "quit"
 ]
 help_width = max(map(len,help_text))
@@ -57,43 +61,54 @@ def draw_centre(screen, text):
     screen.addstr(start_y + 3, (width // 2) - 2, '-' * 4)
     screen.addstr(start_y + 5, start_x_keystr, keystr)
 
-def draw_table(screen, data, start):
-    height, width = screen.getmaxyx()
-    
-    if len(data) < 0:
-        return
-    table = data[start:start+height-3]
-    titles = [d for d in table[0]]
+class Table:
+    def __init__(self, screen, data) -> None:
+        self.screen = screen
+        self.data = data
+        if len(data) == 0: return
+        self.titles = list(data[0].asDict().keys())
 
-    
-    ml = [max(len(l),max(map(lambda x : len(x[l]),table))) for l in titles] #get column widths
-    index_width = max(len(str(start+height)),3)#width of the row number column
+        self.ml = [max(len(l),max(map(lambda x : len(str(x[l])),data))) for l in self.titles] #get column widths
+        self.index_width = max(len(str(len(data))),3)#width of the row number column
 
-    
-    screen.addstr(1,0,"{:>{}}|".format("row",index_width),curses.A_BOLD)
-    x = index_width + 1
-    #draw title
-    for col in range(len(titles)):
-        screen.addstr(1,x,"{:>{}}|".format(titles[col],ml[col]),curses.A_BOLD)
-        x+=ml[col]+1
-    screen.addstr(0, 0, '-'*width)
-    screen.addstr(2, 0, '-'*width)
+    def draw_table(self,start):
+        
+        if len(self.data) == 0 or self.screen == None:
+            return 0
+        height, width = self.screen.getmaxyx()
 
-    #draw table
-    for row in range(len(table)):
-        screen.addstr(row+3,0,"{:>{}}|".format(str(start+row),index_width),curses.A_UNDERLINE)
-        x = index_width + 1
-        line = table[row]
-        for col in range(len(titles)):
-            screen.addstr(row+3,x,"{:>{}}|".format(line[titles[col]],ml[col]),curses.A_UNDERLINE)
-            x+=ml[col]+1
+        table = self.data[start:start+height-3]
 
-    return sum(ml) + len(titles) + index_width + 2 #return total width
+        
+        self.screen.addstr(1,0,"{:>{}}|".format("row",self.index_width),curses.A_BOLD)
+        x = self.index_width + 1
+        #draw title
+        for col in range(len(self.titles)):
+            self.screen.addstr(1,x,"{:>{}}|".format(self.titles[col],self.ml[col]),curses.A_BOLD)
+            x+=self.ml[col]+1
+        self.screen.addstr(0, 0, '-'*width)
+        self.screen.addstr(2, 0, '-'*width)
+
+        #draw table
+        for row in range(len(table)):
+            self.screen.addstr(row+3,0,"{:>{}}|".format(str(start+row),self.index_width),curses.A_UNDERLINE)
+            x = self.index_width + 1
+            line = table[row]
+            for col in range(len(self.titles)):
+                length = self.ml[col]
+                self.screen.addstr(row+3,x,
+                    "{:>{}}|".format(str(line[self.titles[col]])[:length],length),
+                    curses.A_UNDERLINE)
+                x+=self.ml[col]+1
+
+        return sum(self.ml) + len(self.titles) + self.index_width + 2 #return total width
             
 
 
 
 def main(screen):
+    result = None
+    table = Table(None,[])
     k = 0
     cursor_x = 0
     table_y = 0
@@ -101,8 +116,8 @@ def main(screen):
     table_width=256
 
     command = ""
-    # Clear and refresh the screen for a blank canvas
-    screen.clear()
+    # erase and refresh the screen for a blank canvas
+    screen.erase()
     screen.refresh()
 
     info = curses.newwin(0,0,0,0)
@@ -114,16 +129,19 @@ def main(screen):
     curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)
     curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_WHITE)
 
+    status = "movie database searcher | STATUS BAR | Message: {}"
+    statusmsg = ""
+
     # Loop where k is the last character pressed
     while (True):
         # Initialization
-        screen.clear()
+        screen.erase()
         height, width = screen.getmaxyx()
-        
+        c_width = min(help_width+2,width)
+        t_heigh = max(0,height - TOP_PADDING)
 
         #draw helptext
-        info.clear()
-        c_width = min(help_width+2,width)
+        info.erase()
         info.resize(height-1, c_width)
         info.mvwin(0, width-c_width)
         
@@ -132,11 +150,11 @@ def main(screen):
         for i in range(height-1):
             info.addch(i,0,'|')
 
-        data =[]
-        for i in range(100):
-            data.append(dict())
-            for j in range(35):
-                data[-1][str(j)]=str(i*j)
+        #data =[]
+        #for i in range(100):
+        #    data.append(dict())
+        #    for j in range(35):
+        #        data[-1][str(j)]=str(i*j)
 
         
 
@@ -150,30 +168,65 @@ def main(screen):
         elif k == curses.KEY_LEFT:
             table_x -= 1
         elif k == curses.KEY_NPAGE:
-            table_y += display.getyx()[0]
+            table_y += t_heigh - 4
         elif k == curses.KEY_PPAGE:
-            table_y -= display.getyx()[0]
+            table_y -= t_heigh - 4
         elif k == curses.KEY_BACKSPACE:
             command = command[:-1]
         elif k == curses.KEY_END:
-            table_y = len(data)-1
-        elif k == curses.KEY_END:
+            table_y = len(table.data)-1
+        elif k == curses.KEY_HOME:
             table_y = 0
-        elif k != 0:
+        elif k == curses.KEY_ENTER or k == 10 or k == 13:
+            if match("q(uit)? *",command):
+                return
+            elif result != None and match("^sortd? +\w+ *$",command): #sort table
+                col_name = command.split()[1]
+                data, msg = result
+                if col_name in data.columns: #check if valid column name
+                    table = Table(display,
+                        data.sort(col(col_name),ascending=command[4]==" "
+                    ).collect())
+                else:
+                    statusmsg = "column name not found"
+            elif match("g(oto)? +\d+ *",command):
+                table_y = int(command.split()[1])
+            else:        
+                result = movies.handle_command(command)
+                if result == None:
+                    statusmsg = "ERROR"
+                else:
+                    data, msg = result
+                    table_x = 0
+                    table_y = 0
+                    table = Table(display,data.collect())
+                    statusmsg = msg #table and status
+            command = ""
+            
+        elif 32 <= k <= 127: #all printable ascii
             command+=chr(k)
 
         table_x = min(table_width-width+c_width, table_x)
         table_x = max(0, table_x)
 
         table_y = max(0, table_y)
-        table_y = min(len(data)-1, table_y)
+        table_y = min(len(table.data)-1, table_y)
 
-        display.clear()
+        display.erase()
         display.resize(height-TOP_PADDING,256)
-        table_width = draw_table(display,data,table_y)
+        table_width = table.draw_table(table_y)
 
-        # display current command
-        screen.addstr(2,4,command[:width - c_width - 1])
+        # display current command prompt
+        screen.attron(curses.color_pair(1))
+        screen.addstr(2,4,"command:> {}".format(command)[:width - c_width - 1],curses.COLOR_BLUE)
+        screen.attroff(curses.color_pair(1))
+
+        #status
+        screen.attron(curses.color_pair(3))
+        msg = status.format(statusmsg)
+        screen.addstr(height - 1, 0, msg)
+        screen.addstr(height - 1, len(msg), " " * (width - len(msg) - 1))
+        screen.attroff(curses.color_pair(3))
 
         # Refresh the screen
         screen.refresh()
