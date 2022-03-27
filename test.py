@@ -10,7 +10,9 @@ help_text = [
     "watch [userid] ",
     "sort col_name",
     "sortd col_name",
+    "year [year]",
     "max len",
+    "clusters",
     "all",
     'movie [id|"title"]',
     "comp id1 id2", 
@@ -24,46 +26,6 @@ def draw_info(screen):
     info = curses.newwin(height-1, c_width, 0, s_width-c_width)
     for i in range(len(help_text)):
         info.addstr(4+i, 2, help_text[i][:c_width-1])
-
-def draw_centre(screen, text):
-    title = "Curses example"[:width-1]
-    subtitle = "Written by Clay McLeod"[:width-1]
-    keystr = "Last key pressed: {}".format(k)[:width-1]
-    statusbarstr = "Press 'q' to exit | STATUS BAR | Pos: {}, {}".format(cursor_x, cursor_y)
-    if k == 0:
-        keystr = "No key press detected..."[:width-1]
-
-    # Centering calculations
-    start_x_title = int((width // 2) - (len(title) // 2) - len(title) % 2)
-    start_x_subtitle = int((width // 2) - (len(subtitle) // 2) - len(subtitle) % 2)
-    start_x_keystr = int((width // 2) - (len(keystr) // 2) - len(keystr) % 2)
-    start_y = int((height // 2) - 2)
-
-    # Rendering some text
-    whstr = "Width: {}, Height: {}".format(width, height)
-    screen.addstr(0, 0, whstr, curses.color_pair(1))
-
-    # Render status bar
-    screen.attron(curses.color_pair(3))
-    screen.addstr(height-1, 0, statusbarstr)
-    screen.addstr(height-1, len(statusbarstr), " " * (width - len(statusbarstr) - 1))
-    screen.attroff(curses.color_pair(3))
-
-    # Turning on attributes for title
-    screen.attron(curses.color_pair(2))
-    screen.attron(curses.A_BOLD)
-
-    # Rendering title
-    screen.addstr(start_y, start_x_title, title)
-
-    # Turning off attributes for title
-    screen.attroff(curses.color_pair(2))
-    screen.attroff(curses.A_BOLD)
-
-    # Print rest of text
-    screen.addstr(start_y + 1, start_x_subtitle, subtitle)
-    screen.addstr(start_y + 3, (width // 2) - 2, '-' * 4)
-    screen.addstr(start_y + 5, start_x_keystr, keystr)
 
 class Table:
     def __init__(self, screen, data) -> None:
@@ -91,8 +53,9 @@ class Table:
         #draw title
         for col in range(len(self.titles)):
             length = min(self.ml[col],max_length)
-            self.screen.addstr(1,x,"{:>{}}|".format(self.titles[col],length))
+            self.screen.addstr(1,x,"{:>{}}|".format(self.titles[col],length)) 
             x+=length+1
+        self.screen.addstr(1,x," "*(width-x))
         self.screen.addstr(0, 0, '-'*width)
         self.screen.addstr(2, 0, '-'*width)
         
@@ -112,6 +75,7 @@ class Table:
                     "{:>{}}|".format(str(line[self.titles[col]])[:length],length),
                     curses.A_UNDERLINE)
                 x+=length+1
+        
         self.screen.attroff(curses.A_UNDERLINE)
 
         return sum(self.ml) + len(self.titles) + self.index_width + 2 #return total width
@@ -217,7 +181,7 @@ def main(screen):
             else:        
                 result = movies.handle_command(command)
                 if result == None:
-                    statusmsg = "ERROR"
+                    statusmsg = "Invalid Command"
                 else:
                     data, msg = result
                     table_x = 0
