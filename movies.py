@@ -9,7 +9,7 @@ from pyspark.ml.feature import VectorAssembler, StandardScaler
 from pyspark.ml.clustering import KMeans
 from pyspark.ml.evaluation import ClusteringEvaluator
 
-from re import match
+from re import match, findall
 
 spark = SparkSession \
     .builder \
@@ -115,12 +115,12 @@ def get_genre(genre_list):
     return data,msg
 
 def get_rec(id):
-    pass
+    user_class = clusters.where(col("userId")==id).collect()[0]["class"]
 """
 get movies for year
 """
 def get_year(year_list):
-    data = reviews.select("*").where(col("year").isin(year_list))
+    data = reviews_avg.select("*").where(col("year").isin(year_list))
     msg = "Count: "+str(data.count())
     return data,msg
 
@@ -131,8 +131,8 @@ def get_movie(terms):
     ids = []
     names = []
     for t in terms:
-        if match("\d+",t): ids.append(int(t))
-        else: names.append(t.strip()[1:-1])
+        if t[0][0] != '"': ids.append(int(t[0]))
+        else: names.append(t[0].strip()[1:-1])
         
     data = reviews_avg.where(col("movieId").isin(ids) | col("title").isin(names))
     msg = "Count: "+str(data.count())
@@ -160,11 +160,13 @@ def get_favorite(id_list):
     return data,msg
 
 def handle_command(command_full):
-   # try:
+    try:
         index = command_full.find(" ")
         command = command_full[:index].strip()
         args = command_full[index + 1:].strip()
-        if match("^watch ( *\d+ *(,|$))+",command_full):
+        if match(".*, *$",command_full): #check for extra comma at the end of the list 
+            return None, "Extra comma"
+        elif match("^watch ( *\d+ *(,|$))+",command_full):
             return getWatched([int(i) for i in args.split(",")])
             
         elif match("^all *$",command_full):
@@ -174,7 +176,7 @@ def handle_command(command_full):
             return clusters, "Count: "+str(clusters.count)
 
         elif match('^movie ( *("[^"]+"|\d+) *(,|$))+',command_full):
-            return get_movie(args.split(","))
+            return get_movie(findall('("[^"]+"|\d+)(?= *(,|$))',args))
 
         elif match("^comp +\d+ +\d+ *$",command_full):
             id1, id2 = args.split()
@@ -188,8 +190,8 @@ def handle_command(command_full):
 
         elif match("^year ( *\d{4} *(,|$))+",command_full):
             return get_year(list(map(int, args.split(","))))
-    #except:
-    #    return None
+    except:
+        return None, "Unexpected error occurred"
 
 def main():
     print("Run main")
