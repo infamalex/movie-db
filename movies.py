@@ -1,5 +1,6 @@
 
 
+from gc import collect
 from os.path import exists
 from pyspark.sql import SparkSession
 import pyspark.sql.functions as F
@@ -14,11 +15,11 @@ from re import match, findall
 spark = SparkSession \
     .builder \
     .appName("PySpark Movie Database") \
+    .config("spark.driver.memory", "15g") \
     .getOrCreate()
-    #.config("spark.some.config.option", "some-value") \
 sc = spark.sparkContext
 
-MOVIE_DB_DIRECTORY = "ml-latest-small/"
+MOVIE_DB_DIRECTORY = "ml-latest/"
 
 #read the data frames
 links = spark.read.csv(MOVIE_DB_DIRECTORY+"links.csv",inferSchema='True',header=True)
@@ -37,7 +38,7 @@ tags = spark.read.csv(MOVIE_DB_DIRECTORY+"tags.csv",inferSchema='True',header=Tr
 reviews = spark.read.csv(MOVIE_DB_DIRECTORY+"movies.csv",inferSchema='True',header=True)\
     .withColumn("genre_array",split(col("genres"),"[|]"))\
     .drop("genres")\
-    .withColumn("year",split(col("title"),"[(](?=.....$)|[)] ?$").getItem(1).cast('int'))\
+    .withColumn("year",split(col("title"),"[(](?=.{5,6}$)|[)] ?$").getItem(1).cast('int'))\
     .join(ratings, ["movieId"], "left")\
     .na.fill(0)
 #reviews.write.json(MOVIE_DB_DIRECTORY+"reviews")
@@ -66,15 +67,17 @@ favorites = user_genres.select('*', rank()
 
 
 #vector assembler 
-
+#cache table for reuse
 CLASS_FILE = "classes.csv"
 if exists(MOVIE_DB_DIRECTORY+CLASS_FILE):
-    clusters = spark.read.csv(MOVIE_DB_DIRECTORY+CLASS_FILE,inferSchema='True',header=True)
+    clusters = spark.read.csv(MOVIE_DB_DIRECTORY+CLASS_FILE,inferSchema='True',header=True)\
+        .sort("userId",ascending=True)
 else:
     pivoted = favorites\
+        .where((col("rank") < 6))\
         .select("userId","rank","split",explode(array_repeat("rank",col("rank"))).alias("c"))\
         .groupBy("userId").pivot("split").count()\
-        .na.fill(0)
+        .na.fill(6)
 
     assemble=VectorAssembler(inputCols=pivoted.columns[1:],outputCol="features")
     assembled_data=assemble.transform(pivoted)
@@ -83,10 +86,12 @@ else:
     data_scale=scale.fit(assembled_data)
     data_scale_output=data_scale.transform(assembled_data)
 
-    kmeans = KMeans(k=10, seed=69)  # 2 clusters here
+    kmeans = KMeans(k=16, seed=69)  # 20 clusters
     model = kmeans.fit(data_scale_output)#.select('features'))
 
-    clusters = model.transform(data_scale_output).select("userId",col("prediction").alias("class"))
+    clusters = model.transform(data_scale_output)\
+        .select("userId",col("prediction").alias("class"))\
+        .sort("userId",ascending=True)
     clusters.write.csv(MOVIE_DB_DIRECTORY+CLASS_FILE,header=True)
 
 
@@ -110,12 +115,34 @@ def getWatched(id_list):
 get all movies in genre
 """
 def get_genre(genre_list):
-    data = reviews_avg.select("movieId","title").where(col("movieId").isin(genre_list))
+    
+    query = array_contains(col("genre_array"),genre_list[0])
+    for g in genre_list[1:]:
+        query |= array_contains(col("genre_array"),g)
+
+    data = reviews_avg.where(query)
     msg = "Count: "+str(data.count())
     return data,msg
 
+"""
+get recommended films
+"""
 def get_rec(id):
-    user_class = clusters.where(col("userId")==id).collect()[0]["class"]
+    watched = list(map(lambda x: x["movieId"],getWatched(id)[0].collect())) #get watched movies
+    favs = list(map(lambda x: x["split"],\
+        favorites.where((col("userId") == id)  ).collect() #get top 3 favorite catagories
+    ))
+
+    data =  reviews_avg\
+        .where(
+            (~col("movieId").isin(watched)) & 
+            array_contains(col("genre_array"),favs[0]) &
+            array_contains(col("genre_array"),favs[1]) &
+            array_contains(col("genre_array"),favs[2])
+        )\
+        .sort("avg_rating",ascending=False)
+    msg = "Count: "+str(data.count())
+    return data,msg
 """
 get movies for year
 """
@@ -148,6 +175,7 @@ def compare(id1, id2):
         .where(array_contains(col("watchers"),id2))
 
     common = get_favorite([id1,id2])[0]\
+        .where((col("rank") < 4))\
         .groupBy("split").count()\
         .where(1 < col("count"))
     common =  str(list(map(lambda x: x["split"],common.collect())))
@@ -166,6 +194,7 @@ def handle_command(command_full):
         args = command_full[index + 1:].strip()
         if match(".*, *$",command_full): #check for extra comma at the end of the list 
             return None, "Extra comma"
+
         elif match("^watch ( *\d+ *(,|$))+",command_full):
             return getWatched([int(i) for i in args.split(",")])
             
@@ -173,7 +202,7 @@ def handle_command(command_full):
             return reviews_avg, "Count: "+str(reviews_avg.count())
 
         elif match("^cluster *$",command_full):
-            return clusters, "Count: "+str(clusters.count)
+            return clusters, "Count: "+str(clusters.count())
 
         elif match('^movie ( *("[^"]+"|\d+) *(,|$))+',command_full):
             return get_movie(findall('("[^"]+"|\d+)(?= *(,|$))',args))
@@ -190,11 +219,13 @@ def handle_command(command_full):
 
         elif match("^year ( *\d{4} *(,|$))+",command_full):
             return get_year(list(map(int, args.split(","))))
+        elif match("^rec +\d+ *$",command_full):
+            return get_rec(int(args))
     except:
         return None, "Unexpected error occurred"
 
 def main():
-    print("Run main")
+    print("Run ass1")
 
 
     
