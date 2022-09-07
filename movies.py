@@ -24,8 +24,6 @@ MOVIE_DB_DIRECTORY = "ml-latest/"
 #read the data frames
 links = spark.read.csv(MOVIE_DB_DIRECTORY+"links.csv",inferSchema='True',header=True)
 
-
-
 ratings = spark.read.csv(MOVIE_DB_DIRECTORY+"ratings.csv",inferSchema='True',header=True)
 
 tags = spark.read.csv(MOVIE_DB_DIRECTORY+"tags.csv",inferSchema='True',header=True)
@@ -140,7 +138,9 @@ def get_rec(id):
             array_contains(col("genre_array"),favs[1]) &
             array_contains(col("genre_array"),favs[2])
         )\
-        .sort("avg_rating",ascending=False)
+        .withColumn(
+            'score', F.log(10.0,col("watches")) * col("avg_rating"))\
+        .sort("score",ascending=False) #find movies from favorite catagories they haven't watched
     msg = "Count: "+str(data.count())
     return data,msg
 """
@@ -182,11 +182,17 @@ def compare(id1, id2):
     msg = "Count: {} Favorites in common: {}".format(data.count(),common )
     return data,msg
 
+"""
+get users favorite genres
+"""
 def get_favorite(id_list):
     data = favorites.where(col("userId").isin(id_list))
     msg = "Count: "+str(data.count())
     return data,msg
 
+"""
+handle user input for queries 
+"""
 def handle_command(command_full):
     try:
         index = command_full.find(" ")

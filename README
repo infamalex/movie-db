@@ -19,6 +19,7 @@ sortd - Sort by a column descending
 fav - Find the favourite genre of a group of users
 comp - Compare the movie tastes of 2 users
 cluster show the clustered classes of all users
+rec - provides recommended movies for user sorted according to a heuristic 
 
 goto - jump to line
 max - set max field widths 

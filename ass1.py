@@ -1,10 +1,9 @@
-import os
 import curses
 import movies
 from re import match
 from pyspark.sql.functions import col
 
-TOP_PADDING=3
+TOP_PADDING=3 #padding for the command line
 help_text = [
     "Commands:",
     "watch [userid] ",
@@ -22,18 +21,14 @@ help_text = [
 ]
 help_width = max(map(len,help_text))
 
-def draw_info(screen):
-    height, s_width = screen.getmaxyx()
-    c_width = help_width+3
-    info = curses.newwin(height-1, c_width, 0, s_width-c_width)
-    for i in range(len(help_text)):
-        info.addstr(4+i, 2, help_text[i][:c_width-1])
-
+"""
+Class for storing the data from a composed data frame
+"""
 class Table:
     def __init__(self, screen, data) -> None:
         self.screen = screen
         self.data = data
-        if len(data) == 0: return
+        if len(data) == 0: return #no data
         self.titles = list(data[0].asDict().keys())
 
         self.ml = [max(len(l),max(map(lambda x : len(str(x[l])),data))) for l in self.titles] #get column widths
@@ -130,7 +125,7 @@ def main(screen):
         
         
         info.attron(curses.A_BOLD)
-        for i in range(min(len(help_text),height-3)):
+        for i in range(min(len(help_text),height-4)):
             info.addstr(2+i, 2, help_text[i][:c_width-1])
             info.attroff(curses.A_BOLD)
 
@@ -177,7 +172,7 @@ def main(screen):
                 else:
                     statusmsg = "column name not found"
             elif match("g(oto)? +\d+ *",command): #jump to entry
-                table_y = int(command.split()[1])
+                table_y = int(command.split()[1])-1
             elif match("m(ax)? +\d+ *",command): #set max col lengths
                 max_length = max(1,int(command.split()[1]))
             else:        
