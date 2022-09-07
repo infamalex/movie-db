@@ -1,11 +1,5 @@
-The only external library used is pyspark
-The interface uses curses, which may need aditional packages on windows
+Movie database searching tool written in python and implimented using Apache Spark with curses interface.
 
-You may need to modify the MOVIE_DB_DIRECTORY constant at the top of movies.py which points to the 
-folder with the csv files.
-
-commands are listed on the right side of the interface.
-square brackets indicates the command accepts a list of parameters
 
 Brief description of commands
 watch - Search user by id, show the number of movies/genre that they have watched
